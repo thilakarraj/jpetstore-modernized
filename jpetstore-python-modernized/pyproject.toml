@@ -1,0 +1,72 @@
+[project]
+name = "jpetstore-modernized"
+version = "0.1.0"
+description = "JPetStore 6 Python modular monolith"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.32.0",
+    "sqlalchemy>=2.0.36",
+    "pymysql>=1.1.1",
+    "cryptography>=43.0.0",
+    "alembic>=1.14.0",
+    "pydantic>=2.10.0",
+    "pydantic-settings>=2.6.0",
+    "email-validator>=2.2.0",
+    "python-jose[cryptography]>=3.3.0",
+    "bcrypt>=4.2.0",
+    "prometheus-client>=0.21.0",
+    "httpx>=0.28.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.3.0",
+    "pytest-asyncio>=0.24.0",
+    "pytest-cov>=6.0.0",
+    "ruff>=0.8.0",
+    "mypy>=1.13.0",
+    "bandit>=1.8.0",
+    "pip-audit>=2.7.0",
+]
+
+[project.scripts]
+jpetstore-seed = "jpetstore.scripts.seed:main"
+jpetstore-verify-database = "jpetstore.scripts.verify_database:main"
+
+[build-system]
+requires = ["setuptools>=75.0.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "S"]
+ignore = ["S104"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+plugins = []
+packages = ["jpetstore"]
+warn_return_any = true
+warn_unused_configs = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+python_files = ["test_*.py"]
+pythonpath = ["src"]
+markers = [
+    "mysql: MySQL 8 integration tests (require TEST_DATABASE_URL=jpetstore_test)",
+]
+
+[tool.bandit]
+exclude_dirs = ["tests", ".venv"]

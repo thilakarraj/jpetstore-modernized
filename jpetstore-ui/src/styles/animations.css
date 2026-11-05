@@ -1,0 +1,29 @@
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+@keyframes cart-bump {
+  0%,
+  100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.15);
+  }
+}
+
+.animate-cart-bump {
+  animation: cart-bump 0.35s ease;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-cart-bump {
+    animation: none;
+  }
+}
