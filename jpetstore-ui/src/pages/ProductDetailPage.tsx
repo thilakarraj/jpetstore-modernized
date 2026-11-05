@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { motion } from "framer-motion";
 import { Minus, Plus } from "lucide-react";
+import { CatalogStatus } from "@/components/catalog/CatalogStatus";
 import { StoreProductCard } from "@/components/product/StoreProductCard";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
@@ -10,6 +11,7 @@ import {
   fetchAllProducts,
   fetchProduct,
   fetchProductItems,
+  getApiErrorMessage,
 } from "@/services/api/catalogService";
 import type { Item, Product } from "@/types/api";
 import { useCartStore } from "@/store/cartStore";
@@ -22,6 +24,8 @@ export function ProductDetailPage({ productId }: { productId: string }) {
   const [selectedItemId, setSelectedItemId] = useState<string>("");
   const [quantity, setQuantity] = useState(1);
   const [related, setRelated] = useState<Product[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const addItem = useCartStore((s) => s.addItem);
   const addRecent = useRecentStore((s) => s.addRecent);
 
@@ -30,30 +34,64 @@ export function ProductDetailPage({ productId }: { productId: string }) {
     [items, selectedItemId],
   );
 
+  const loadProduct = useCallback(
+    async (signal: AbortSignal) => {
+      setLoading(true);
+      setError(null);
+      try {
+        const [p, itemList, all] = await Promise.all([
+          fetchProduct(productId),
+          fetchProductItems(productId),
+          fetchAllProducts(),
+        ]);
+        if (signal.aborted) return;
+        const enriched = enrichProduct(p);
+        setProduct(enriched);
+        setItems(itemList);
+        const firstInStock = itemList.find((i) => i.in_stock) ?? itemList[0];
+        if (firstInStock) setSelectedItemId(firstInStock.item_id);
+        addRecent(enriched);
+        setRelated(
+          all
+            .filter((x) => x.category_id === p.category_id && x.product_id !== p.product_id)
+            .slice(0, 4)
+            .map(enrichProduct),
+        );
+      } catch (e) {
+        if (signal.aborted) return;
+        setProduct(null);
+        setItems([]);
+        setError(getApiErrorMessage(e));
+      } finally {
+        if (!signal.aborted) setLoading(false);
+      }
+    },
+    [productId, addRecent],
+  );
+
   useEffect(() => {
-    void (async () => {
-      const [p, itemList, all] = await Promise.all([
-        fetchProduct(productId),
-        fetchProductItems(productId),
-        fetchAllProducts(),
-      ]);
-      const enriched = enrichProduct(p);
-      setProduct(enriched);
-      setItems(itemList);
-      const firstInStock = itemList.find((i) => i.in_stock) ?? itemList[0];
-      if (firstInStock) setSelectedItemId(firstInStock.item_id);
-      addRecent(enriched);
-      setRelated(
-        all
-          .filter((x) => x.category_id === p.category_id && x.product_id !== p.product_id)
-          .slice(0, 4)
-          .map(enrichProduct),
-      );
-    })();
-  }, [productId, addRecent]);
+    const controller = new AbortController();
+    void loadProduct(controller.signal);
+    return () => controller.abort();
+  }, [loadProduct]);
+
+  if (loading || error) {
+    return (
+      <div className="mx-auto max-w-7xl px-4 py-10 sm:px-6 lg:px-8">
+        <CatalogStatus
+          loading={loading}
+          error={error}
+          onRetry={() => {
+            const controller = new AbortController();
+            void loadProduct(controller.signal);
+          }}
+        />
+      </div>
+    );
+  }
 
   if (!product) {
-    return <p className="p-10 text-muted-foreground">Loading product…</p>;
+    return null;
   }
 
   const inStock = selectedItem?.in_stock ?? false;

@@ -1,4 +1,4 @@
-import type { Cart, CartLine, Item, Order, OrderLine, OrderStatus, Product } from "@/types/api";
+import type { Cart, CartLine, Category, Item, Order, OrderLine, OrderStatus, Product } from "@/types/api";
 import { getProductImage } from "@/services/mocks/catalogFixtures";
 
 export interface BackendCartLine {
@@ -99,9 +99,19 @@ export function mapOrderSummary(data: BackendOrderSummary): Order {
 
 export function mapProductSummary(product: Product): Product {
   return {
-    ...product,
+    product_id: product.product_id,
+    category_id: product.category_id,
+    name: product.name ?? "",
     description: product.description ?? "",
     image_url: product.image_url ?? getProductImage(product),
+  };
+}
+
+export function mapCategorySummary(category: Category): Category {
+  return {
+    category_id: category.category_id,
+    name: category.name ?? "",
+    description: category.description ?? "",
   };
 }
 

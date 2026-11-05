@@ -1,5 +1,6 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
+import { CatalogStatus } from "@/components/catalog/CatalogStatus";
 import { StoreProductCard } from "@/components/product/StoreProductCard";
 import { Select } from "@/components/ui/Select";
 import {
@@ -8,6 +9,7 @@ import {
   fetchCategories,
   fetchCategory,
   fetchProductsByCategory,
+  getApiErrorMessage,
   searchProducts,
 } from "@/services/api/catalogService";
 import type { Category, Product } from "@/types/api";
@@ -27,21 +29,31 @@ export function CatalogPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    void (async () => {
-      setLoading(true);
-      setError(null);
-      try {
-        const [cats, list] = await Promise.all([fetchCategories(), fetchAllProducts()]);
-        setCategories(cats);
-        setProducts(list.map(enrichProduct));
-      } catch (e) {
-        setError(e instanceof Error ? e.message : "Failed to load catalog");
-      } finally {
-        setLoading(false);
-      }
-    })();
+  const loadCatalog = useCallback(async (signal: AbortSignal) => {
+    setLoading(true);
+    setError(null);
+    try {
+      const cats = await fetchCategories();
+      if (signal.aborted) return;
+      const list = await fetchAllProducts(cats);
+      if (signal.aborted) return;
+      setCategories(cats);
+      setProducts(list.map(enrichProduct));
+    } catch (e) {
+      if (signal.aborted) return;
+      setCategories([]);
+      setProducts([]);
+      setError(getApiErrorMessage(e));
+    } finally {
+      if (!signal.aborted) setLoading(false);
+    }
   }, []);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    void loadCatalog(controller.signal);
+    return () => controller.abort();
+  }, [loadCatalog]);
 
   const filtered = useMemo(() => {
     let list = [...products];
@@ -89,6 +101,7 @@ export function CatalogPage() {
           value={categoryFilter}
           onChange={(e) => updateParam("category", e.target.value)}
           className="sm:max-w-xs"
+          disabled={loading || Boolean(error)}
         >
           <option value="">All categories</option>
           {categories.map((c) => (
@@ -110,13 +123,36 @@ export function CatalogPage() {
         </Select>
       </div>
 
-      {loading ? <p className="text-muted-foreground">Loading products…</p> : null}
-      {error ? <p className="text-error">{error}</p> : null}
+      {loading || error ? (
+        <CatalogStatus
+          loading={loading}
+          error={error}
+          onRetry={() => {
+            const controller = new AbortController();
+            void loadCatalog(controller.signal);
+          }}
+        />
+      ) : null}
 
-      {!loading && slice.length === 0 ? (
-        <p className="rounded-xl border border-border bg-surface p-8 text-center text-muted-foreground">
-          No products match your filters.
-        </p>
+      {!loading && !error && slice.length === 0 ? (
+        <CatalogStatus
+          loading={false}
+          error={null}
+          empty
+          emptyMessage={
+            products.length === 0
+              ? "No products in the catalog. Seed the backend database (jpetstore-seed)."
+              : "No products match your filters."
+          }
+          onRetry={
+            products.length === 0
+              ? () => {
+                  const controller = new AbortController();
+                  void loadCatalog(controller.signal);
+                }
+              : undefined
+          }
+        />
       ) : (
         <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
           {slice.map((product) => (
@@ -125,7 +161,7 @@ export function CatalogPage() {
         </div>
       )}
 
-      {totalPages > 1 ? (
+      {!loading && !error && totalPages > 1 ? (
         <div className="mt-10 flex items-center justify-center gap-2">
           <button
             type="button"
@@ -168,7 +204,7 @@ export function CatalogSearchPage() {
       setResults(list.map(enrichProduct));
     } catch (e) {
       setResults([]);
-      setError(e instanceof Error ? e.message : "Search failed");
+      setError(getApiErrorMessage(e));
     } finally {
       setLoading(false);
     }
@@ -202,8 +238,15 @@ export function CatalogSearchPage() {
           Search
         </button>
       </form>
-      {error ? <p className="mt-4 text-error">{error}</p> : null}
+      {error ? (
+        <div className="mt-4 rounded-xl border border-error/40 bg-error/5 p-4 text-error" role="alert">
+          {error}
+        </div>
+      ) : null}
       {loading ? <p className="mt-6 text-muted-foreground">Searching…</p> : null}
+      {!loading && !error && results.length === 0 && initial ? (
+        <p className="mt-6 text-muted-foreground">No products matched your search.</p>
+      ) : null}
       <div className="mt-8 grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
         {results.map((product) => (
           <StoreProductCard key={product.product_id} product={product} />
@@ -217,22 +260,56 @@ export function CategoryPage({ categoryId }: { categoryId: string }) {
   const [category, setCategory] = useState<Category | null>(null);
   const [products, setProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const loadCategory = useCallback(
+    async (signal: AbortSignal) => {
+      if (!categoryId.trim()) {
+        setError("Missing category ID.");
+        setLoading(false);
+        return;
+      }
+      setLoading(true);
+      setError(null);
+      try {
+        const [cat, list] = await Promise.all([
+          fetchCategory(categoryId),
+          fetchProductsByCategory(categoryId),
+        ]);
+        if (signal.aborted) return;
+        setCategory(cat);
+        setProducts(list.map(enrichProduct));
+      } catch (e) {
+        if (signal.aborted) return;
+        setCategory(null);
+        setProducts([]);
+        setError(getApiErrorMessage(e));
+      } finally {
+        if (!signal.aborted) setLoading(false);
+      }
+    },
+    [categoryId],
+  );
 
   useEffect(() => {
-    void (async () => {
-      setLoading(true);
-      const [cat, list] = await Promise.all([
-        fetchCategory(categoryId),
-        fetchProductsByCategory(categoryId),
-      ]);
-      setCategory(cat);
-      setProducts(list.map(enrichProduct));
-      setLoading(false);
-    })();
-  }, [categoryId]);
+    const controller = new AbortController();
+    void loadCategory(controller.signal);
+    return () => controller.abort();
+  }, [loadCategory]);
 
-  if (loading) {
-    return <p className="p-10 text-muted-foreground">Loading category…</p>;
+  if (loading || error) {
+    return (
+      <div className="mx-auto max-w-7xl px-4 py-10 sm:px-6 lg:px-8">
+        <CatalogStatus
+          loading={loading}
+          error={error}
+          onRetry={() => {
+            const controller = new AbortController();
+            void loadCategory(controller.signal);
+          }}
+        />
+      </div>
+    );
   }
 
   return (
@@ -240,11 +317,26 @@ export function CategoryPage({ categoryId }: { categoryId: string }) {
       <p className="text-sm uppercase tracking-widest text-accent">{category?.category_id}</p>
       <h1 className="font-display text-4xl">{category?.name}</h1>
       <p className="mt-2 max-w-2xl text-muted-foreground">{category?.description}</p>
-      <div className="mt-8 grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
-        {products.map((product) => (
-          <StoreProductCard key={product.product_id} product={product} />
-        ))}
-      </div>
+      {products.length === 0 ? (
+        <div className="mt-8">
+          <CatalogStatus
+            loading={false}
+            error={null}
+            empty
+            emptyMessage="No products in this category."
+            onRetry={() => {
+              const controller = new AbortController();
+              void loadCategory(controller.signal);
+            }}
+          />
+        </div>
+      ) : (
+        <div className="mt-8 grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
+          {products.map((product) => (
+            <StoreProductCard key={product.product_id} product={product} />
+          ))}
+        </div>
+      )}
     </div>
   );
 }

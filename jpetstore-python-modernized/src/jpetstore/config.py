@@ -58,7 +58,7 @@ class Settings(BaseSettings):
     log_json: bool = Field(default=True, alias="LOG_JSON")
 
     cors_origins: str = Field(
-        default="http://localhost:5173,http://localhost:8000",
+        default="http://localhost:5173,http://127.0.0.1:5173,http://localhost:8000",
         alias="CORS_ORIGINS",
     )
 

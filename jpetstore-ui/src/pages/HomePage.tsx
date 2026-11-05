@@ -1,13 +1,15 @@
 import { motion } from "framer-motion";
 import { Link } from "react-router-dom";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { HomeHero } from "@/components/home/HomeHero";
+import { CatalogStatus } from "@/components/catalog/CatalogStatus";
 import { StoreProductCard } from "@/components/product/StoreProductCard";
 import { Button } from "@/components/ui/Button";
 import {
   enrichProduct,
   fetchAllProducts,
   fetchCategories,
+  getApiErrorMessage,
 } from "@/services/api/catalogService";
 import type { Category, Product } from "@/types/api";
 import { useMotionSafe } from "@/hooks/useMotionSafe";
@@ -17,18 +19,41 @@ export function HomePage() {
   const [categories, setCategories] = useState<Category[]>([]);
   const [featured, setFeatured] = useState<Product[]>([]);
   const [newArrivals, setNewArrivals] = useState<Product[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const recent = useRecentStore((s) => s.products);
   const { stagger, transition, reduce } = useMotionSafe();
 
-  useEffect(() => {
-    void (async () => {
-      const [cats, products] = await Promise.all([fetchCategories(), fetchAllProducts()]);
+  const loadHome = useCallback(async (signal: AbortSignal) => {
+    setLoading(true);
+    setError(null);
+    try {
+      const cats = await fetchCategories();
+      if (signal.aborted) return;
+      const products = await fetchAllProducts(cats);
+      if (signal.aborted) return;
       const enriched = products.map(enrichProduct);
       setCategories(cats);
       setFeatured(enriched.slice(0, 4));
       setNewArrivals([...enriched].reverse().slice(0, 4));
-    })();
+    } catch (e) {
+      if (signal.aborted) return;
+      setCategories([]);
+      setFeatured([]);
+      setNewArrivals([]);
+      setError(getApiErrorMessage(e));
+    } finally {
+      if (!signal.aborted) setLoading(false);
+    }
   }, []);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    void loadHome(controller.signal);
+    return () => controller.abort();
+  }, [loadHome]);
+
+  const showCatalogIssue = loading || error || categories.length === 0;
 
   return (
     <>
@@ -44,36 +69,51 @@ export function HomePage() {
             <Button variant="outline">View all</Button>
           </Link>
         </div>
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {categories.map((cat, index) => (
-            <motion.div
-              key={cat.category_id}
-              initial={reduce ? false : { opacity: 0, y: 16 }}
-              whileInView={{ opacity: 1, y: 0 }}
-              viewport={{ once: true, margin: "-40px" }}
-              transition={{ ...transition, delay: index * stagger }}
-            >
-              <Link
-                to={`/categories/${cat.category_id}`}
-                className="group block cursor-pointer rounded-xl border border-border bg-surface p-6 shadow-card transition-shadow hover:shadow-elevated"
+        {showCatalogIssue ? (
+          <CatalogStatus
+            loading={loading}
+            error={error}
+            empty={!loading && !error && categories.length === 0}
+            emptyMessage="No categories returned from the API. Run database migrations and jpetstore-seed on the backend."
+            onRetry={() => {
+              const controller = new AbortController();
+              void loadHome(controller.signal);
+            }}
+          />
+        ) : (
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            {categories.map((cat, index) => (
+              <motion.div
+                key={cat.category_id}
+                initial={reduce ? false : { opacity: 0, y: 16 }}
+                whileInView={{ opacity: 1, y: 0 }}
+                viewport={{ once: true, margin: "-40px" }}
+                transition={{ ...transition, delay: index * stagger }}
               >
-                <p className="text-xs uppercase tracking-widest text-accent">{cat.category_id}</p>
-                <h3 className="mt-2 font-display text-2xl">{cat.name}</h3>
-                <p className="mt-2 text-sm text-muted-foreground">{cat.description}</p>
-              </Link>
-            </motion.div>
-          ))}
-        </div>
+                <Link
+                  to={`/categories/${cat.category_id}`}
+                  className="group block cursor-pointer rounded-xl border border-border bg-surface p-6 shadow-card transition-shadow hover:shadow-elevated"
+                >
+                  <p className="text-xs uppercase tracking-widest text-accent">{cat.category_id}</p>
+                  <h3 className="mt-2 font-display text-2xl">{cat.name}</h3>
+                  <p className="mt-2 text-sm text-muted-foreground">{cat.description}</p>
+                </Link>
+              </motion.div>
+            ))}
+          </div>
+        )}
       </section>
 
       <PromoBand />
 
-      <ProductSection title="Featured products" products={featured} badge="featured" />
-      <ProductSection title="New arrivals" products={newArrivals} badge="new" />
-
-      {recent.length > 0 ? (
-        <ProductSection title="Recently viewed" products={recent} />
+      {!loading && !error && featured.length > 0 ? (
+        <ProductSection title="Featured products" products={featured} badge="featured" />
       ) : null}
+      {!loading && !error && newArrivals.length > 0 ? (
+        <ProductSection title="New arrivals" products={newArrivals} badge="new" />
+      ) : null}
+
+      {recent.length > 0 ? <ProductSection title="Recently viewed" products={recent} /> : null}
     </>
   );
 }

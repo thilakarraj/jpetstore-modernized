@@ -1,9 +1,8 @@
-import { apiClient, useMockApi } from "@/services/api/client";
-import { mapItemSummary } from "@/services/api/mappers";
+import { apiClient, getApiErrorMessage, useMockApi } from "@/services/api/client";
+import { mapCategorySummary, mapItemSummary, mapProductSummary } from "@/services/api/mappers";
 import {
   getItemsForProduct,
   getProductById,
-  getProductImage,
   mockCategories,
   mockProducts,
   mockItems,
@@ -18,7 +17,7 @@ export async function fetchCategories(): Promise<Category[]> {
   const { data } = await apiClient.get<{ categories: Category[] }>(
     "/api/v1/catalog/categories",
   );
-  return data.categories;
+  return data.categories.map(mapCategorySummary);
 }
 
 export async function fetchCategory(categoryId: string): Promise<Category> {
@@ -29,9 +28,9 @@ export async function fetchCategory(categoryId: string): Promise<Category> {
     return cat;
   }
   const { data } = await apiClient.get<Category>(
-    `/api/v1/catalog/categories/${categoryId}`,
+    `/api/v1/catalog/categories/${encodeURIComponent(categoryId)}`,
   );
-  return data;
+  return mapCategorySummary(data);
 }
 
 export async function fetchProductsByCategory(categoryId: string): Promise<Product[]> {
@@ -40,17 +39,20 @@ export async function fetchProductsByCategory(categoryId: string): Promise<Produ
     return mockProducts.filter((p) => p.category_id === categoryId);
   }
   const { data } = await apiClient.get<{ products: Product[] }>(
-    `/api/v1/catalog/categories/${categoryId}/products`,
+    `/api/v1/catalog/categories/${encodeURIComponent(categoryId)}/products`,
   );
-  return data.products;
+  return data.products.map(mapProductSummary);
 }
 
-export async function fetchAllProducts(): Promise<Product[]> {
+export async function fetchAllProducts(existingCategories?: Category[]): Promise<Product[]> {
   if (useMockApi) {
     await delay(200);
     return mockProducts;
   }
-  const categories = await fetchCategories();
+  const categories = existingCategories ?? (await fetchCategories());
+  if (categories.length === 0) {
+    return [];
+  }
   const lists = await Promise.all(
     categories.map((c) => fetchProductsByCategory(c.category_id)),
   );
@@ -67,9 +69,9 @@ export async function fetchProduct(productId: string): Promise<Product> {
     return product;
   }
   const { data } = await apiClient.get<Product>(
-    `/api/v1/catalog/products/${productId}`,
+    `/api/v1/catalog/products/${encodeURIComponent(productId)}`,
   );
-  return data;
+  return mapProductSummary(data);
 }
 
 export async function fetchProductItems(productId: string): Promise<Item[]> {
@@ -78,7 +80,7 @@ export async function fetchProductItems(productId: string): Promise<Item[]> {
     return getItemsForProduct(productId);
   }
   const { data } = await apiClient.get<{ items: Array<Omit<Item, "product_id">> }>(
-    `/api/v1/catalog/products/${productId}/items`,
+    `/api/v1/catalog/products/${encodeURIComponent(productId)}/items`,
   );
   return data.items.map((item) => mapItemSummary(productId, item));
 }
@@ -104,7 +106,7 @@ export async function searchProducts(keyword: string): Promise<Product[]> {
     "/api/v1/catalog/products/search",
     { params: { keyword: trimmed } },
   );
-  return data.products;
+  return data.products.map(mapProductSummary);
 }
 
 export async function fetchItem(itemId: string): Promise<Item> {
@@ -115,23 +117,45 @@ export async function fetchItem(itemId: string): Promise<Item> {
     const product = getProductById(item.product_id);
     return { ...item, product, quantity: item.quantity };
   }
-  const { data } = await apiClient.get<Item>(`/api/v1/catalog/items/${itemId}`);
-  return data;
+  const { data } = await apiClient.get<Item & { product?: Product }>(
+    `/api/v1/catalog/items/${encodeURIComponent(itemId)}`,
+  );
+  const productId = data.product?.product_id ?? "";
+  return {
+    ...mapItemSummary(productId, data),
+    product_id: productId,
+    product: data.product ? mapProductSummary(data.product) : undefined,
+    quantity: data.quantity,
+  };
 }
 
 export function enrichProduct(product: Product): Product {
-  return {
-    ...product,
-    image_url: product.image_url ?? getProductImage(product),
-  };
+  return mapProductSummary(product);
 }
+
+export { getApiErrorMessage };
 
 function delay(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+export function getLowestPriceFromItems(items: Item[]): number | null {
+  if (!items.length) return null;
+  const prices = items
+    .map((i) => parseFloat(i.list_price))
+    .filter((n) => Number.isFinite(n));
+  return prices.length ? Math.min(...prices) : null;
+}
+
 export function getLowestPrice(productId: string): number | null {
   const items = getItemsForProduct(productId);
-  if (!items.length) return null;
-  return Math.min(...items.map((i) => parseFloat(i.list_price)));
+  return getLowestPriceFromItems(items);
+}
+
+export function getDefaultInStockItem(items: Item[]): Item | undefined {
+  return items.find((i) => i.in_stock) ?? items[0];
+}
+
+export function getDefaultInStockItemId(productId: string): string | undefined {
+  return getDefaultInStockItem(getItemsForProduct(productId))?.item_id;
 }

@@ -1,14 +1,19 @@
 import axios from "axios";
 import { STORAGE_KEYS } from "@/utils/cn";
 import type { ApiErrorBody } from "@/types/api";
+import {
+  apiBaseUrl,
+  getApiConfigError,
+  logApiConfigInDev,
+  useMockApi,
+} from "@/services/api/config";
 
-const baseURL = import.meta.env.VITE_API_BASE_URL ?? "";
+export { useMockApi };
 
-/** Use mock fixtures only when explicitly enabled (never silent fallback in production). */
-export const useMockApi = import.meta.env.VITE_USE_MOCK_API === "true";
+logApiConfigInDev();
 
 export const apiClient = axios.create({
-  baseURL,
+  baseURL: apiBaseUrl,
   headers: {
     "Content-Type": "application/json",
   },
@@ -16,6 +21,9 @@ export const apiClient = axios.create({
 });
 
 apiClient.interceptors.request.use((config) => {
+  if (!useMockApi && getApiConfigError()) {
+    return Promise.reject(new Error(getApiConfigError() ?? "Invalid API configuration"));
+  }
   const token = localStorage.getItem(STORAGE_KEYS.accessToken);
   if (token) {
     config.headers.Authorization = `Bearer ${token}`;
@@ -34,9 +42,22 @@ apiClient.interceptors.response.use(
 );
 
 export function getApiErrorMessage(error: unknown): string {
+  const configError = getApiConfigError();
+  if (configError && !useMockApi) {
+    return configError;
+  }
   if (axios.isAxiosError(error)) {
     const data = error.response?.data as ApiErrorBody | undefined;
     if (data?.error?.message) return data.error.message;
+    if (error.response?.status === 404) {
+      return "The requested resource was not found on the API.";
+    }
+    if (error.response?.status === 0 || error.code === "ERR_NETWORK") {
+      return (
+        "Cannot reach the API. Confirm the backend is running, VITE_API_BASE_URL is correct, " +
+        "and CORS allows this browser origin."
+      );
+    }
     if (error.response?.status === 401) {
       return "Please sign on to continue.";
     }

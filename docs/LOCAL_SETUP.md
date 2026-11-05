@@ -9,12 +9,14 @@
 ## 1. Backend
 
 ```powershell
-cd D:\workspace\haiintel\jpetstore-python-modernized
+cd D:\workspace\haiintel\jpetstore-modernized\jpetstore-python-modernized
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 pip install -e ".[dev]"
 Copy-Item .env.example .env
-# Edit .env: DATABASE_URL, JWT_SECRET, CORS_ORIGINS includes UI origin
+# Edit .env: DATABASE_URL, JWT_SECRET
+# CORS_ORIGINS must include BOTH UI origins, e.g.:
+#   http://localhost:5173,http://127.0.0.1:5173,http://127.0.0.1:8000
 alembic upgrade head
 jpetstore-seed
 uvicorn jpetstore.main:app --reload --host 127.0.0.1 --port 8000
@@ -25,16 +27,16 @@ Verify: `http://127.0.0.1:8000/health` and `http://127.0.0.1:8000/docs`
 ## 2. Frontend (integrated)
 
 ```powershell
-cd D:\workspace\haiintel\jpetstore-ui
+cd D:\workspace\haiintel\jpetstore-modernized\jpetstore-ui
 npm install
 Copy-Item .env.example .env
-# Set:
+# Required for live catalog:
 #   VITE_API_BASE_URL=http://127.0.0.1:8000
 #   VITE_USE_MOCK_API=false
 npm run dev
 ```
 
-Open the URL Vite prints (usually `http://127.0.0.1:5173`).
+Open the URL Vite prints (`http://127.0.0.1:5173` or `http://localhost:5173`). If you use `127.0.0.1` for the UI, backend `CORS_ORIGINS` must include `http://127.0.0.1:5173`.
 
 ## 3. Demo workflow (live API)
 
